@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"net"
 	"os"
 	"os/exec"
@@ -11,8 +12,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var address *string
+
 func get_battery_power_plugged() bool {
-	connection, err := net.Dial("tcp", "127.0.0.1:8423")
+	connection, err := net.Dial("tcp", *address)
 	if err != nil {
 		log.Error().Msg("Error connecting to server")
 	}
@@ -38,14 +41,17 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout}).Level(zerolog.InfoLevel)
 
-	defaultTimer := 1 * time.Minute
-	timer := defaultTimer
+	defaultTimer := flag.Duration("timer", 1*time.Minute, "Time to wait before shutting down")
+	address = flag.String("address", "127.0.0.1:8423", "Address of the server to connect to")
+	flag.Parse()
+
+	timer := *defaultTimer
 	for {
 		if connected := get_battery_power_plugged(); connected {
-			if timer != defaultTimer {
+			if timer != *defaultTimer {
 				log.Info().Msg("Connected to power source")
 				log.Info().Msg("Resetting timer")
-				timer = defaultTimer
+				timer = *defaultTimer
 			}
 			time.Sleep(10 * time.Second)
 		} else {
