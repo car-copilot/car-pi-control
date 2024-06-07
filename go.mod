@@ -1,4 +1,4 @@
-module github.com/car-copilot/car-pi-shutdown
+module github.com/car-copilot/car-pi-control
 
 go 1.20
 
