@@ -37,6 +37,7 @@ func get_battery_power_plugged() bool {
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	log.Level(zerolog.InfoLevel)
 
 	defaultTimer := 1 * time.Minute
 	timer := defaultTimer
