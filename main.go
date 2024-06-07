@@ -10,7 +10,7 @@ import (
 )
 
 func get_battery_power_plugged() bool {
-	connection, err := net.Dial("tcp", "192.168.1.102:8423")
+	connection, err := net.Dial("tcp", "127.0.0.1:8423")
 	if err != nil {
 		log.Error().Msg("Error connecting to server")
 	}
