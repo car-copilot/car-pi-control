@@ -2,7 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,9 +16,11 @@ import (
 )
 
 var address *string
+var piSugarPort *string
+var httpClient = http.DefaultClient
 
-func get_battery_power_plugged() bool {
-	connection, err := net.Dial("tcp", *address)
+func get_battery_power_plugged(piSugarAddress string) bool {
+	connection, err := net.Dial("tcp", piSugarAddress)
 	if err != nil {
 		log.Error().Msg("Error connecting to server")
 	}
@@ -37,17 +42,38 @@ func get_battery_power_plugged() bool {
 
 }
 
+func set_volume(volume int) {
+	form := url.Values{}
+	form.Add("volknob", fmt.Sprint(volume))
+	form.Add("event", "knob_change")
+
+	resp, err := httpClient.PostForm("http://"+*address+"/command/playback.php?cmd=upd_volume", form)
+	if err != nil || resp.StatusCode != 200 {
+		log.Error().Msg("Error setting volume")
+	}
+	defer resp.Body.Close()
+
+	log.Info().Msgf("Volume set to %d", volume)
+
+}
+
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout}).Level(zerolog.InfoLevel)
 
 	defaultTimer := flag.Duration("timer", 1*time.Minute, "Time to wait before shutting down")
-	address = flag.String("address", "127.0.0.1:8423", "Address of the server to connect to")
+	address = flag.String("address", "127.0.0.1", "Address of the server to connect to")
+	piSugarPort = flag.String("port", "8423", "Port of the server to connect to")
 	flag.Parse()
+
+	go func() {
+		time.Sleep(20 * time.Second)
+		set_volume(98)
+	}()
 
 	timer := *defaultTimer
 	for {
-		if connected := get_battery_power_plugged(); connected {
+		if connected := get_battery_power_plugged(fmt.Sprintf("%s:%s", *address, *piSugarPort)); connected {
 			if timer != *defaultTimer {
 				log.Info().Msg("Connected to power source")
 				log.Info().Msg("Resetting timer")
