@@ -66,8 +66,10 @@ func main() {
 	piSugarPort = flag.String("port", "8423", "Port of the server to connect to")
 	flag.Parse()
 
-	time.Sleep(20 * time.Second)
-	set_volume(98)
+	go func() {
+		time.Sleep(20 * time.Second)
+		set_volume(98)
+	}()
 
 	timer := *defaultTimer
 	for {
