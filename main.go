@@ -64,7 +64,7 @@ func set_config(card int) {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{Transport: tr}
-	var data = strings.NewReader(fmt.Sprintf("output_device_cardnum=%d&update_output_device=novalue&mixer_type=null&camilladsp_volume_range=60&i2sdevice=None&i2soverlay=None&drvoptions=none&autoplay=1&extmeta=0&ashufflesvc=0&ashuffle_mode=Track&ashuffle_window=7&ashuffle_filter=None&volume_step_limit=5&volume_mpd_max=100&volume_db_display=1&usb_volknob=0&rotaryenc=0&rotenc_params=100+2+3+23+24&mpdcrossfade=0&mpd_httpd=0&mpd_httpd_port=8000&mpd_httpd_encoder=lame&cdsp_mode=Audi.yml", card)
+	var data = strings.NewReader(fmt.Sprintf("output_device_cardnum=%d&update_output_device=novalue&mixer_type=null&camilladsp_volume_range=60&i2sdevice=None&i2soverlay=None&drvoptions=none&autoplay=1&extmeta=0&ashufflesvc=0&ashuffle_mode=Track&ashuffle_window=7&ashuffle_filter=None&volume_step_limit=5&volume_mpd_max=100&volume_db_display=1&usb_volknob=0&rotaryenc=0&rotenc_params=100+2+3+23+24&mpdcrossfade=0&mpd_httpd=0&mpd_httpd_port=8000&mpd_httpd_encoder=lame&cdsp_mode=Audi.yml", card))
 	req, err := http.NewRequest("POST", "http://"+*address+"/snd-config.php", data)
 	if err != nil {
 		log.Fatal().Err(err)
@@ -101,8 +101,9 @@ func main() {
 	flag.Parse()
 
 	go func() {
-		time.Sleep(20 * time.Second)
+		time.Sleep(30 * time.Second)
 		set_config(0)
+		time.Sleep(5 * time.Second)
 		set_volume(98)
 	}()
 
