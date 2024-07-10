@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -85,10 +84,10 @@ func set_config(card int) {
 		log.Fatal().Err(err)
 	}
 	defer resp.Body.Close()
-	bodyText, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatal().Err(err)
-	}
+	// bodyText, err := io.ReadAll(resp.Body)
+	// if err != nil {
+	// 	log.Fatal().Err(err)
+	// }
 }
 
 func main() {
