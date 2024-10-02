@@ -1,14 +1,11 @@
 package main
 
 import (
-	"crypto/tls"
 	"flag"
 	"fmt"
+	"math"
 	"net"
-	"net/http"
-	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -16,18 +13,22 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var address *string
+var piSugarIP *string
 var piSugarPort *string
-var httpClient = http.DefaultClient
+var sleepTimerDefault time.Duration
+var shutdownTimerDefault time.Duration
+var scheduledShutDownTimer time.Duration
 
-func get_battery_power_plugged(piSugarAddress string) bool {
-	connection, err := net.Dial("tcp", piSugarAddress)
+// var httpClient = http.DefaultClient
+
+func pisugar_send_command(command string) string {
+	connection, err := net.Dial("tcp", fmt.Sprintf("%s:%s", *piSugarIP, *piSugarPort))
 	if err != nil {
 		log.Error().Msg("Error connecting to server")
 	}
 	defer connection.Close()
 
-	_, err = connection.Write([]byte("get battery_power_plugged"))
+	_, err = connection.Write([]byte(command))
 	if err != nil {
 		panic(err)
 	}
@@ -36,98 +37,137 @@ func get_battery_power_plugged(piSugarAddress string) bool {
 	if err != nil {
 		log.Error().Msg("Error reading from server")
 	}
-	out := strings.TrimSpace(string(buffer[:mLen]))
+	return strings.TrimSpace(string(buffer[:mLen]))
+}
+
+func get_battery_power_plugged() bool {
+	out := pisugar_send_command("get battery_power_plugged")
 	out = out[len(out)-4:]
 	log.Debug().Msgf("Battery power plugged: %s", out)
 	return string(out) == "true"
 
 }
 
-func set_volume(volume int) {
-	form := url.Values{}
-	form.Add("volknob", fmt.Sprint(volume))
-	form.Add("event", "knob_change")
+func set_rtc_wake_alarm(wakeupTime time.Time) {
+	log.Info().Msgf("Setting wake up alarm to %s", wakeupTime)
+	//2024-10-02T20:53:26.000+02:00
+	pisugar_send_command(fmt.Sprintf("set rtc_wake_alarm %d 1", wakeupTime.Format("2006-01-02T15:04:05.000-07:00")))
+	set_time := pisugar_send_command("get rtc_alarm_time")
 
-	resp, err := httpClient.PostForm("http://"+*address+"/command/playback.php?cmd=upd_volume", form)
-	if err != nil || resp.StatusCode != 200 {
-		log.Error().Msg("Error setting volume")
+	log.Info().Msgf("Wake up alarm set to %s", set_time[16:])
+}
+
+func sync_time_from_web() {
+	log.Info().Msg("Syncing time from web")
+	pisugar_send_command("rtc_web")
+}
+
+func sync_time_from_rtc() {
+	log.Info().Msg("Syncing time from rtc")
+	pisugar_send_command("rtc_rtc2pi")
+}
+
+func dayInList(day time.Weekday, list []time.Weekday) bool {
+	for _, d := range list {
+		if d == day {
+			return true
+		}
 	}
-	defer resp.Body.Close()
+	return false
+}
 
-	log.Info().Msgf("Volume set to %d", volume)
+func switch_wake_up_alarm() {
+	log.Info().Msg("Switching wake up alarm")
+	powerOnDays := []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday}
+	powerOnTime := []struct {
+		time     time.Duration
+		duration time.Duration
+	}{
+		{time: time.Duration(8) * time.Hour, duration: time.Duration(45) * time.Minute},
+		{time: time.Duration(12) * time.Hour, duration: time.Duration(45) * time.Minute},
+		{time: time.Duration(17) * time.Hour, duration: time.Duration(45) * time.Minute},
+	}
+	if dayInList(time.Now().Weekday(), powerOnDays) {
+		for i, t := range powerOnTime {
+			hour, _ := math.Modf(t.time.Hours())
+			minute, _ := math.Modf(t.time.Minutes())
+			powerTimeToday := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), int(hour), int(minute), 0, 0, time.Now().Location())
+			if time.Now().Before(powerTimeToday) {
+				set_rtc_wake_alarm(powerTimeToday)
+			}
+			if i == len(powerOnTime)-1 {
+				hour, _ := math.Modf(powerOnTime[0].time.Hours())
+				minute, _ := math.Modf(powerOnTime[0].time.Minutes())
+				powerOnTimeTomorrow := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), int(hour), int(minute), 0, 0, time.Now().Location())
+				set_rtc_wake_alarm(powerOnTimeTomorrow)
+			}
+		}
+	}
 
 }
 
-func set_config(card int) {
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{Transport: tr}
-	var data = strings.NewReader(fmt.Sprintf("output_device_cardnum=%d&update_output_device=novalue&mixer_type=null&camilladsp_volume_range=60&i2sdevice=None&i2soverlay=None&drvoptions=none&autoplay=1&extmeta=0&ashufflesvc=0&ashuffle_mode=Track&ashuffle_window=7&ashuffle_filter=None&volume_step_limit=5&volume_mpd_max=100&volume_db_display=1&usb_volknob=0&rotaryenc=0&rotenc_params=100+2+3+23+24&mpdcrossfade=0&mpd_httpd=0&mpd_httpd_port=8000&mpd_httpd_encoder=lame&cdsp_mode=Audi.yml", card))
-	req, err := http.NewRequest("POST", "http://"+*address+"/snd-config.php", data)
-	if err != nil {
-		log.Fatal().Err(err)
-	}
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Cache-Control", "no-cache")
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Cookie", "PHPSESSID=ho7vk67sqrjua8sme0pqhsjgdq")
-	req.Header.Set("Origin", "http://"+*address)
-	req.Header.Set("Pragma", "no-cache")
-	req.Header.Set("Referer", "http://"+*address+"/snd-config.php")
-	req.Header.Set("Upgrade-Insecure-Requests", "1")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatal().Err(err)
-	}
-	defer resp.Body.Close()
-	// bodyText, err := io.ReadAll(resp.Body)
+func start() {
+	log.Info().Msg("Starting")
+}
+
+func shutdown() {
+	log.Info().Msg("Shutdown initiated")
+	switch_wake_up_alarm()
+	// cmd := exec.Command("shutdown", "now")
+	// err := cmd.Run()
 	// if err != nil {
-	// 	log.Fatal().Err(err)
+	// 	log.Error().Msg("Error shutting down computer")
 	// }
+}
+
+func sleep() {
+	log.Info().Msg("Sleep initiated")
+}
+
+func run() {
+	sleepTimer := sleepTimerDefault
+	shutdownTimer := shutdownTimerDefault
+	previoslyConnected := false
+	for {
+		if connected := get_battery_power_plugged(fmt.Sprintf("%s:%s", *piSugarIP, *piSugarPort)); connected {
+			if !previoslyConnected {
+				log.Info().Msg("Connected to power source")
+				log.Info().Msg("Resetting timers")
+				sleepTimer = sleepTimerDefault
+				shutdownTimer = shutdownTimerDefault
+				start()
+			}
+			previoslyConnected = true
+		} else {
+			if sleepTimer > (5 * time.Second) {
+				log.Info().Msgf("Sleeping down in %s", sleepTimer)
+			} else {
+				sleep()
+				if shutdownTimer > (5 * time.Second) {
+					log.Info().Msgf("Shutting down in %s", shutdownTimer)
+				} else {
+					shutdown()
+				}
+			}
+			sleepTimer = sleepTimer - 10*time.Second
+			previoslyConnected = false
+		}
+		scheduledShutDownTimer = scheduledShutDownTimer - 10*time.Second
+		time.Sleep(10 * time.Second)
+	}
 }
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout}).Level(zerolog.InfoLevel)
 
-	defaultTimer := flag.Duration("timer", 1*time.Minute, "Time to wait before shutting down")
-	address = flag.String("address", "127.0.0.1", "Address of the server to connect to")
+	sleepTimerDefault = *flag.Duration("timer", 1*time.Minute, "Time to wait before sleep down")
+	piSugarIP = flag.String("address", "127.0.0.1", "Address of the server to connect to")
 	piSugarPort = flag.String("port", "8423", "Port of the server to connect to")
 	flag.Parse()
 
-	go func() {
-		time.Sleep(30 * time.Second)
-		set_config(0)
-		time.Sleep(5 * time.Second)
-		set_volume(98)
-	}()
+	sync_time_from_rtc()
 
-	timer := *defaultTimer
-	for {
-		if connected := get_battery_power_plugged(fmt.Sprintf("%s:%s", *address, *piSugarPort)); connected {
-			if timer != *defaultTimer {
-				log.Info().Msg("Connected to power source")
-				log.Info().Msg("Resetting timer")
-				timer = *defaultTimer
-			}
-			time.Sleep(10 * time.Second)
-		} else {
-			log.Info().Msgf("Shuting down in %s", timer)
-			if timer < (5 * time.Second) {
-				log.Info().Msg("Shutdown initiated")
-				// Shutdown the computer
-				cmd := exec.Command("shutdown", "now")
-				err := cmd.Run()
-				if err != nil {
-					log.Error().Msg("Error shutting down computer")
-				}
-			}
-			timer = timer - 10*time.Second
-			time.Sleep(10 * time.Second)
-		}
-	}
+	go run()
+
 }

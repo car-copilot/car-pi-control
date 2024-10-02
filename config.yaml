@@ -1,0 +1,11 @@
+schedule:
+  days: [monday, tuesday, wednesday, thursday, friday]
+  time:
+    - start: 8h
+      uptime: 45m
+    - start: 11h55
+      uptime: 45m
+    - start: 17h
+      uptime: 1h
+trustedWifi:
+  - wifi-name
