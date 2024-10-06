@@ -3,9 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"math"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -15,9 +16,9 @@ import (
 
 var piSugarIP *string
 var piSugarPort *string
-var sleepTimerDefault time.Duration
-var shutdownTimerDefault time.Duration
-var scheduledShutDownTimer time.Duration
+var sleepTimerDefault *time.Duration
+var shutdownTimerDefault *time.Duration
+var scheduledShutDownTimer *time.Duration
 
 // var httpClient = http.DefaultClient
 
@@ -51,7 +52,8 @@ func get_battery_power_plugged() bool {
 func set_rtc_wake_alarm(wakeupTime time.Time) {
 	log.Info().Msgf("Setting wake up alarm to %s", wakeupTime)
 	//2024-10-02T20:53:26.000+02:00
-	pisugar_send_command(fmt.Sprintf("set rtc_wake_alarm %s 5", wakeupTime.Format("2006-01-02T15:04:05.000-07:00")))
+	log.Debug().Msgf("Computed date string: %s", wakeupTime.Format("2006-01-02T15:04:05.000-07:00"))
+	pisugar_send_command(fmt.Sprintf("rtc_alarm_set %s 5", wakeupTime.Format("2006-01-02T15:04:05.000-07:00")))
 	set_time := pisugar_send_command("get rtc_alarm_time")
 
 	log.Info().Msgf("Wake up alarm set to %s", set_time[16:])
@@ -83,25 +85,30 @@ func switch_wake_up_alarm() {
 		time     time.Duration
 		duration time.Duration
 	}{
-		{time: time.Duration(8) * time.Hour, duration: time.Duration(45) * time.Minute},
-		{time: time.Duration(12) * time.Hour, duration: time.Duration(45) * time.Minute},
-		{time: time.Duration(17) * time.Hour, duration: time.Duration(45) * time.Minute},
+		{time: 8 * time.Hour, duration: 45 * time.Minute},
+		{time: 12 * time.Hour, duration: 45 * time.Minute},
+		{time: 17 * time.Hour, duration: 45 * time.Minute},
 	}
 	if dayInList(time.Now().Weekday(), powerOnDays) {
 		for i, t := range powerOnTime {
-			hour, _ := math.Modf(t.time.Hours())
-			minute, _ := math.Modf(t.time.Minutes())
-			powerTimeToday := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), int(hour), int(minute), 0, 0, time.Now().Location())
+			powerTimeToday := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Now().Location())
+			powerTimeToday = powerTimeToday.Add(t.time)
 			if time.Now().Before(powerTimeToday) {
 				set_rtc_wake_alarm(powerTimeToday)
+				scheduledShutDownTimer = &t.duration
 			}
 			if i == len(powerOnTime)-1 {
-				hour, _ := math.Modf(powerOnTime[0].time.Hours())
-				minute, _ := math.Modf(powerOnTime[0].time.Minutes())
-				powerOnTimeTomorrow := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), int(hour), int(minute), 0, 0, time.Now().Location())
+				powerOnTimeTomorrow := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Now().Location())
+				powerOnTimeTomorrow = powerOnTimeTomorrow.Add(powerOnTime[0].time)
 				set_rtc_wake_alarm(powerOnTimeTomorrow)
+				scheduledShutDownTimer = &powerOnTime[0].duration
 			}
 		}
+	} else {
+		powerOnTimeMonday := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Now().Location())
+		powerOnTimeMonday = powerOnTimeMonday.Add(powerOnTime[0].time)
+		set_rtc_wake_alarm(powerOnTimeMonday)
+		scheduledShutDownTimer = &powerOnTime[0].duration
 	}
 
 }
@@ -120,39 +127,95 @@ func shutdown() {
 	// }
 }
 
+func rfkill_get_devices_count() int {
+
+	cmd := exec.Command("rfkill", "--raw")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Error().Err(err)
+	}
+	if err := cmd.Start(); err != nil {
+		log.Error().Err(err)
+	}
+	buf := new(strings.Builder)
+	_, err = io.Copy(buf, stdout)
+	if err != nil {
+		log.Error().Err(err)
+	}
+	s := buf.String()
+	log.Debug().Msgf("rfkill out put:\n%s", s)
+	count := 0
+	for _, c := range s {
+		if c == '\n' {
+			count++
+		}
+	}
+	return count - 1
+}
+
+func rfkill_block_all(dcount int) {
+	for i := 0; i < dcount; i++ {
+		log.Info().Msgf("Blocking device %d", i)
+		cmd := exec.Command(fmt.Sprintf("rfkill block %d", i))
+		err := cmd.Run()
+		if err != nil {
+			log.Error().Err(err)
+		}
+	}
+}
+
 func sleep() {
 	log.Info().Msg("Sleep initiated")
+	log.Info().Msg("Turning Off wifi & bt")
+	rfkill_block_all(rfkill_get_devices_count())
+	log.Info().Msg("Stopping pipewire")
+
 }
 
 func run() {
-	sleepTimer := sleepTimerDefault
+	sleepTimer := *sleepTimerDefault
 	shutdownTimer := shutdownTimerDefault
 	previoslyConnected := false
+	sleepOn := false
 	for {
 		if connected := get_battery_power_plugged(); connected {
 			if !previoslyConnected {
 				log.Info().Msg("Connected to power source")
 				log.Info().Msg("Resetting timers")
-				sleepTimer = sleepTimerDefault
+				sleepTimer = *sleepTimerDefault
 				shutdownTimer = shutdownTimerDefault
+				sleepOn = false
 				start()
 			}
 			previoslyConnected = true
 		} else {
 			if sleepTimer > (5 * time.Second) {
-				log.Info().Msgf("Sleeping down in %s", sleepTimer)
+				log.Info().Msgf("Sleeping in %s", sleepTimer)
 			} else {
-				sleep()
-				if shutdownTimer > (5 * time.Second) {
-					log.Info().Msgf("Shutting down in %s", shutdownTimer)
+				if !sleepOn {
+					sleep()
+					sleepOn = true
+				}
+				if !previoslyConnected {
+					if *scheduledShutDownTimer > (5 * time.Second) {
+						log.Info().Msgf("Shutting down in %s", scheduledShutDownTimer)
+					} else {
+						shutdown()
+					}
 				} else {
-					shutdown()
+					if *shutdownTimer > (5 * time.Second) {
+						log.Info().Msgf("Shutting down in %s", shutdownTimer)
+						newTimer := *shutdownTimer - 10*time.Second
+						shutdownTimer = &newTimer
+					} else {
+						shutdown()
+					}
 				}
 			}
 			sleepTimer = sleepTimer - 10*time.Second
-			previoslyConnected = false
 		}
-		scheduledShutDownTimer = scheduledShutDownTimer - 10*time.Second
+		newTimer := *scheduledShutDownTimer - 10*time.Second
+		scheduledShutDownTimer = &newTimer
 		time.Sleep(10 * time.Second)
 	}
 }
@@ -161,13 +224,20 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout}).Level(zerolog.InfoLevel)
 
-	sleepTimerDefault = *flag.Duration("timer", 1*time.Minute, "Time to wait before sleep down")
+	sleepTimerDefault = flag.Duration("sleeptimer", 1*time.Minute, "Time to wait before low power mode")
+	shutdownTimerDefault = flag.Duration("shutdowntimer", 10*time.Minute, "Time to wait before shutdown after sleep")
 	piSugarIP = flag.String("address", "127.0.0.1", "Address of the server to connect to")
 	piSugarPort = flag.String("port", "8423", "Port of the server to connect to")
+	debug := flag.Bool("debug", false, "Enable debug output")
 	flag.Parse()
 
-	sync_time_from_rtc()
+	if *debug {
+		log.Logger = log.Level(zerolog.DebugLevel)
+	}
 
-	go run()
+	log.Info().Msg("Starting car-pi-control")
+	sync_time_from_rtc()
+	switch_wake_up_alarm()
+	run()
 
 }
