@@ -51,7 +51,7 @@ func get_battery_power_plugged() bool {
 func set_rtc_wake_alarm(wakeupTime time.Time) {
 	log.Info().Msgf("Setting wake up alarm to %s", wakeupTime)
 	//2024-10-02T20:53:26.000+02:00
-	pisugar_send_command(fmt.Sprintf("set rtc_wake_alarm %d 1", wakeupTime.Format("2006-01-02T15:04:05.000-07:00")))
+	pisugar_send_command(fmt.Sprintf("set rtc_wake_alarm %s 5", wakeupTime.Format("2006-01-02T15:04:05.000-07:00")))
 	set_time := pisugar_send_command("get rtc_alarm_time")
 
 	log.Info().Msgf("Wake up alarm set to %s", set_time[16:])
@@ -129,7 +129,7 @@ func run() {
 	shutdownTimer := shutdownTimerDefault
 	previoslyConnected := false
 	for {
-		if connected := get_battery_power_plugged(fmt.Sprintf("%s:%s", *piSugarIP, *piSugarPort)); connected {
+		if connected := get_battery_power_plugged(); connected {
 			if !previoslyConnected {
 				log.Info().Msg("Connected to power source")
 				log.Info().Msg("Resetting timers")
