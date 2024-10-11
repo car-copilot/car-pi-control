@@ -1,0 +1,12 @@
+[Unit]
+Description=Bt agent
+After=wireplumber.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+ExecStart=/home/obito1903/car-pi-control/bt-agent
+
+[Install]
+WantedBy=wireplumber.service
