@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	carpicontrol "github.com/car-copilot/car-pi-control/pkg"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -115,6 +116,7 @@ func switch_wake_up_alarm() {
 
 func start() {
 	log.Info().Msg("Starting")
+	carpicontrol.Start_bt_agent()
 }
 
 func shutdown() {
@@ -172,6 +174,7 @@ func sleep() {
 
 }
 
+// Program loop
 func run() {
 	sleepTimer := *sleepTimerDefault
 	shutdownTimer := shutdownTimerDefault
@@ -220,6 +223,16 @@ func run() {
 	}
 }
 
+// Prepare the rpi at boot, syncing rtc to the pi, updating wake up alarm and enter sleep mode if not connected
+func init_pi() {
+	sync_time_from_rtc()
+	switch_wake_up_alarm()
+
+	if connected := get_battery_power_plugged(); connected {
+		sleep()
+	}
+}
+
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout}).Level(zerolog.InfoLevel)
@@ -236,8 +249,8 @@ func main() {
 	}
 
 	log.Info().Msg("Starting car-pi-control")
-	sync_time_from_rtc()
-	switch_wake_up_alarm()
+
+	init_pi()
 	run()
 
 }
