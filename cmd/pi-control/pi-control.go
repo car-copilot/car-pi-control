@@ -140,6 +140,13 @@ func start() {
 	if err != nil {
 		log.Error().Err(err)
 	}
+
+	log.Info().Msg("Starting obd-exporter")
+	cmd = exec.Command("systemctl", "start", "obd-exporter")
+	err = cmd.Run()
+	if err != nil {
+		log.Error().Err(err)
+	}
 }
 
 func shutdown() {
@@ -205,6 +212,18 @@ func sleep() {
 	if err != nil {
 		log.Error().Err(err)
 	}
+	log.Info().Msg("Stopping obd-exporter")
+	cmd = exec.Command("systemctl", "stop", "obd-exporter")
+	err = cmd.Run()
+	if err != nil {
+		log.Error().Err(err)
+	}
+	log.Info().Msg("Stopping influxdb")
+	cmd = exec.Command("systemctl", "stop", "influxdb")
+	err = cmd.Run()
+	if err != nil {
+		log.Error().Err(err)
+	}
 	cmd = exec.Command("cpufreq-set", "-g", "powersave")
 	err = cmd.Run()
 	if err != nil {
@@ -214,6 +233,7 @@ func sleep() {
 
 func checkConnection() (ok bool) {
 	_, err := http.Get("http://clients3.google.com/generate_204")
+	log.Debug().Msg("Connected to the internet")
 	return err == nil
 }
 
@@ -242,11 +262,11 @@ func try_wifi() bool {
 
 	if connected {
 		log.Info().Msg("Opening tunnel to home")
-		cmd := exec.Command("nmcli", "connection", "up", "id", "home")
-		err := cmd.Run()
-		if err != nil {
-			log.Error().Err(err)
-		}
+		// cmd := exec.Command("nmcli", "connection", "up", "id", "home")
+		// err := cmd.Run()
+		// if err != nil {
+		// 	log.Error().Err(err)
+		// }
 	}
 
 	return connected
@@ -257,6 +277,7 @@ func run() {
 	sleepTimer := *sleepTimerDefault
 	shutdownTimer := shutdownTimerDefault
 	previoslyConnected := false
+	connectedOnStart := false
 	sleepOn := false
 	for {
 		if connected := get_battery_power_plugged(); connected {
@@ -269,6 +290,7 @@ func run() {
 				start()
 			}
 			previoslyConnected = true
+			connectedOnStart = true
 		} else {
 			if sleepTimer > (5 * time.Second) {
 				log.Info().Msgf("Sleeping in %s", sleepTimer)
@@ -281,7 +303,7 @@ func run() {
 					sleep()
 					sleepOn = true
 				}
-				if !previoslyConnected {
+				if !connectedOnStart {
 					if *scheduledShutDownTimer > (5 * time.Second) {
 						log.Info().Msgf("Shutting down in %s", scheduledShutDownTimer)
 					} else {
@@ -296,6 +318,7 @@ func run() {
 						shutdown()
 					}
 				}
+				previoslyConnected = false
 			}
 			sleepTimer = sleepTimer - 10*time.Second
 		}

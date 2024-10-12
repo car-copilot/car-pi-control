@@ -6,7 +6,7 @@ Type=simple
 Restart=always
 RestartSec=1
 User=root
-ExecStart=/home/obito1903/car-pi-control/pi-control
+ExecStart=/home/obito1903/car-pi-control/pi-control -sleeptime=5m -shutdowntimer=10m
 
 [Install]
 WantedBy=multi-user.target
