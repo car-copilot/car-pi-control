@@ -1,6 +1,6 @@
 module github.com/car-copilot/car-pi-control
 
-go 1.20
+go 1.22
 
 require (
 	github.com/muka/go-bluetooth v0.0.0-20240701044517-04c4f09c514e

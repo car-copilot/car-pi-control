@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"net/http"
 	"os"
 	"time"
 
@@ -116,13 +117,25 @@ func switch_wake_up_alarm() {
 
 func start() {
 	log.Info().Msg("Starting pipewire")
-	cmd := exec.Command("su", "-", "obito1903", "-c", "systemctl", "--user", "start", "pipewire", "pipewire-pulse", "wireplumber")
+	cmd := exec.Command("cpufreq-set", "-g", "performance")
 	err := cmd.Run()
 	if err != nil {
 		log.Error().Err(err)
 	}
+	cmd = exec.Command("systemctl", "--user", "--machine=obito1903@.host", "start", "pipewire", "pipewire-pulse", "wireplumber")
+	err = cmd.Run()
+	if err != nil {
+		log.Error().Err(err)
+	}
 	log.Info().Msg("Starting bt-agent")
-	cmd = exec.Command("su", "-", "obito1903", "-c", "systemctl", "--user", "start", "bt-agent.service")
+	cmd = exec.Command("systemctl", "--user", "--machine=obito1903@.host", "start", "bt-agent.service")
+	err = cmd.Run()
+	if err != nil {
+		log.Error().Err(err)
+	}
+
+	log.Info().Msg("Starting influxdb")
+	cmd = exec.Command("systemctl", "start", "influxdb.service")
 	err = cmd.Run()
 	if err != nil {
 		log.Error().Err(err)
@@ -178,20 +191,68 @@ func rfkill_block_all(dcount int) {
 
 func sleep() {
 	log.Info().Msg("Sleep initiated")
-	log.Info().Msg("Turning Off wifi & bt")
-	rfkill_block_all(rfkill_get_devices_count())
+	// log.Info().Msg("Turning Off wifi & bt")
+	// rfkill_block_all(rfkill_get_devices_count())
 	log.Info().Msg("Stopping bt-agent")
-	cmd := exec.Command("su", "-", "obito1903", "-c", "systemctl", "--user", "stop", "bt-agent.service")
+	cmd := exec.Command("systemctl", "--user", "--machine=obito1903@.host", "stop", "bt-agent.service")
 	err := cmd.Run()
 	if err != nil {
 		log.Error().Err(err)
 	}
 	log.Info().Msg("Stopping pipewire")
-	cmd = exec.Command("su", "-", "obito1903", "-c", "systemctl", "--user", "stop", "pipewire", "pipewire-pulse", "wireplumber")
+	cmd = exec.Command("systemctl", "--user", "--machine=obito1903@.host", "stop", "pipewire", "pipewire-pulse", "wireplumber")
 	err = cmd.Run()
 	if err != nil {
 		log.Error().Err(err)
 	}
+	cmd = exec.Command("cpufreq-set", "-g", "powersave")
+	err = cmd.Run()
+	if err != nil {
+		log.Error().Err(err)
+	}
+}
+
+func checkConnection() (ok bool) {
+	_, err := http.Get("http://clients3.google.com/generate_204")
+	return err == nil
+}
+
+func try_wifi() bool {
+	connected := false
+	home := false
+	for i := range 10 {
+		if connected = checkConnection(); connected {
+			break
+		} else {
+			log.Info().Msgf("Connection attempt %d", i)
+			home = false
+			cmd := exec.Command("nmcli", "connection", "up", "id", "9+10")
+			err := cmd.Run()
+			if err != nil {
+				log.Error().Err(err)
+			}
+			connected = checkConnection()
+			if !connected {
+				cmd := exec.Command("nmcli", "connection", "up", "id", "Sam-318")
+				err := cmd.Run()
+				if err != nil {
+					log.Error().Err(err)
+				}
+				home = true
+			}
+		}
+	}
+
+	if connected && !home {
+		log.Info().Msg("Opening tunnel to home")
+		cmd := exec.Command("nmcli", "connection", "up", "id", "home")
+		err := cmd.Run()
+		if err != nil {
+			log.Error().Err(err)
+		}
+	}
+
+	return connected
 }
 
 // Program loop
@@ -214,6 +275,10 @@ func run() {
 		} else {
 			if sleepTimer > (5 * time.Second) {
 				log.Info().Msgf("Sleeping in %s", sleepTimer)
+				if !checkConnection() {
+					log.Info().Msg("Attempting to connect to internet")
+					go try_wifi()
+				}
 			} else {
 				if !sleepOn {
 					sleep()
@@ -247,6 +312,13 @@ func run() {
 func init_pi() {
 	sync_time_from_rtc()
 	switch_wake_up_alarm()
+
+	// log.Info().Msg("Selecting default bluetooth controller")
+	// cmd := exec.Command("bluetoothctl", "select", "E8:48:B8:C8:20:00")
+	// err := cmd.Run()
+	// if err != nil {
+	// 	log.Error().Err(err)
+	// }
 
 	if connected := get_battery_power_plugged(); connected {
 		sleep()
