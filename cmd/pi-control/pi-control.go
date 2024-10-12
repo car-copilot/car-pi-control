@@ -219,13 +219,11 @@ func checkConnection() (ok bool) {
 
 func try_wifi() bool {
 	connected := false
-	home := false
 	for i := range 10 {
 		if connected = checkConnection(); connected {
 			break
 		} else {
 			log.Info().Msgf("Connection attempt %d", i)
-			home = false
 			cmd := exec.Command("nmcli", "connection", "up", "id", "9+10")
 			err := cmd.Run()
 			if err != nil {
@@ -238,12 +236,11 @@ func try_wifi() bool {
 				if err != nil {
 					log.Error().Err(err)
 				}
-				home = true
 			}
 		}
 	}
 
-	if connected && !home {
+	if connected {
 		log.Info().Msg("Opening tunnel to home")
 		cmd := exec.Command("nmcli", "connection", "up", "id", "home")
 		err := cmd.Run()
